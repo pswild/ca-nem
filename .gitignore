@@ -1,5 +1,5 @@
 # ignore data
-data/
+data/*
 
 # ignore compiled Python
 __pycache__/
