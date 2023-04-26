@@ -49,14 +49,14 @@ rev_lmp_file = os.path.join(here, 'output/rev_lmp.csv')
 
 #--- FUNCTIONS ---#
 
-def sites():
-     '''Get distribtued generation interconnection program data from CAISO.'''
+def dg():
+     '''Get distributed generation interconnection program data from CAISO.'''
 
      # Directory path. 
      dir = 'data/Interconnected_Project_Sites_2023-03-31/'
 
      # Dataframe for sites. 
-     sites = pd.DataFrame()
+     dg = pd.DataFrame()
 
      # Combine interconnection data from all utilities.
      for file in os.listdir(dir):
@@ -64,19 +64,40 @@ def sites():
           # Update path.
           path = os.path.join(dir, file)
 
-          # Columns.
-          cols = [
-               
-          ]
-
-          # Read day into dataframe. 
-          day = pd.read_csv(path, skiprows=[0,1,2,3,5], index_col=False)
+          # Columns to keep.
+          usecols = [
+               'Application Id',
+               'Utility',
+               'Service City',
+               'Service Zip',
+               'Service County',
+               'Technology Type',
+               'System Size DC',
+               'System Size AC',
+               'Inverter Size (kW AC)',
+               'Tilt',
+               'Azimuth',
+               'Mounting Method',
+               'Tracking',
+               'Customer Sector',
+               'App Approved Date',
+               'Total System Cost',
+               'Itc Cost Basis',
+               'NEM Tariff',
+               'Interconnection Program',
+               'VNEM, NEM-V, NEM-Agg',
+               'Project is VNEM, NEM-V, NEM-Agg?',
+               'NEMPV or nonNEMPV'
+          ]          
+          
+          # Read data from one utility into dataframe. 
+          subset = pd.read_csv(path, usecols=usecols, index_col=False)
 
           # Strip extraneous information.
-          day.drop(columns=['H'], inplace=True)
+          subset.drop(columns=['H'], inplace=True)
 
           # Append day to year. 
-          year = pd.concat([year, day], ignore_index=True)
+          dg = pd.concat([dg, subset], ignore_index=True)
      
      # Combine to datetime. 
      year['Date'] = pd.to_datetime(year['Date'] + ' ' + year['Time'])
@@ -109,7 +130,7 @@ def sites():
 
      return year
 
-def lmp():
+def lmps():
      '''Get real-time locational marginal prices for CAISO in 2022.'''
 
      # Directory path. 
