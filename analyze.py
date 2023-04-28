@@ -24,10 +24,8 @@ here = os.path.dirname(os.path.realpath(__file__))
 
 #--- DATA ---#
 
-# CAISO interconnection data. 
-pge_sites_file = os.path.join(here, 'data/Interconnected_Project_Sites_2023-03-31/PGE_Interconnected_Project_Sites_2023-03-31.csv')
-sce_sites_file = os.path.join(here, 'data/Interconnected_Project_Sites_2023-03-31/SCE_Interconnected_Project_Sites_2023-03-31.csv')
-sdge_sites_file = os.path.join(here, 'data/Interconnected_Project_Sites_2023-03-31/SDGE_Interconnected_Project_Sites_2023-03-31.csv')
+# Site file.
+site_file = os.path.join(here, 'data/CAISO_Interconnected_Project_Sites_2023-03-31.csv')
 
 # CAISO locational marginal price data.
 lmp_file = os.path.join(here, 'data/lmps.csv')
@@ -49,14 +47,61 @@ rev_lmp_file = os.path.join(here, 'output/rev_lmp.csv')
 
 #--- FUNCTIONS ---#
 
-def dg():
-     '''Get distributed generation interconnection program data from CAISO.'''
+def intercon():
+     '''Load distributed generation interconnection program data from CAISO.'''
 
-     # Directory path. 
+     # Columns to keep.
+     usecols = [
+          'Application Id',
+          'Utility',
+          'Service City',
+          'Service Zip',
+          'Service County',
+          'Technology Type',
+          'System Size DC',
+          'System Size AC',
+          'Inverter Size (kW AC)',
+          'Tilt',
+          'Azimuth',
+          'Mounting Method',
+          'Tracking',
+          'Customer Sector',
+          'App Approved Date',
+          'Total System Cost',
+          'Itc Cost Basis',
+          'NEM Tariff',
+          'Interconnection Program',
+          'VNEM, NEM-V, NEM-Agg',
+          'Project is VNEM, NEM-V, NEM-Agg?',
+          'NEMPV or nonNEMPV'
+     ]
+
+     # Utilities. 
+     utilities = [
+          'PGE',
+          'SDGE',
+          'SCE'
+     ]
+
+     # Technologies in which solar is the sole means of generation.
+     # NOTE: should we include sites with storage?
+     technologies = [
+          'Solar PV',
+          'Solar',
+          'Solar PV, Storage',
+          'Solar PV;Storage',
+          'SOLAR PV',
+          'Other, Solar PV',
+          'Other, Solar PV, Storage'
+     ]
+
+     #--- LOAD ---#
+
+     # Directory.
      dir = 'data/Interconnected_Project_Sites_2023-03-31/'
 
      # Dataframe for sites. 
-     dg = pd.DataFrame()
+     df = pd.DataFrame()
 
      # Combine interconnection data from all utilities.
      for file in os.listdir(dir):
@@ -64,122 +109,93 @@ def dg():
           # Update path.
           path = os.path.join(dir, file)
 
-          # Columns to keep.
-          usecols = [
-               'Application Id',
-               'Utility',
-               'Service City',
-               'Service Zip',
-               'Service County',
-               'Technology Type',
-               'System Size DC',
-               'System Size AC',
-               'Inverter Size (kW AC)',
-               'Tilt',
-               'Azimuth',
-               'Mounting Method',
-               'Tracking',
-               'Customer Sector',
-               'App Approved Date',
-               'Total System Cost',
-               'Itc Cost Basis',
-               'NEM Tariff',
-               'Interconnection Program',
-               'VNEM, NEM-V, NEM-Agg',
-               'Project is VNEM, NEM-V, NEM-Agg?',
-               'NEMPV or nonNEMPV'
-          ]          
-          
           # Read data from one utility into dataframe. 
-          subset = pd.read_csv(path, usecols=usecols, index_col=False)
+          subset = pd.read_csv(path, usecols=usecols)
 
-          # Strip extraneous information.
-          subset.drop(columns=['H'], inplace=True)
+          # Append. 
+          df = pd.concat([df, subset])
 
-          # Append day to year. 
-          dg = pd.concat([dg, subset], ignore_index=True)
-     
-     # Combine to datetime. 
-     year['Date'] = pd.to_datetime(year['Date'] + ' ' + year['Time'])
+     #--- FILTER ---#
+
+     # Filter data by utility, customer sector, tariff structure, and technology type.
+     df = df.loc[
+          (df['Utility'].isin(utilities)) &
+          (df['Customer Sector'] == 'Residential') &
+          (df['NEMPV or nonNEMPV'] == 'NEMPV') & 
+          (df['Technology Type'].isin(technologies))
+     ]
+
+     #--- CLEAN ---#
+
+     # Convert to datetime.
+     df['App Approved Date'] = pd.to_datetime(df['App Approved Date'])
 
      # Sort by date.
-     year.sort_values(by=['Date'], inplace=True, ignore_index=True)
+     df.sort_values(by=['App Approved Date'], ascending=False, inplace=True, ignore_index=True)
      
-     # Floor date to hour.
-     year['Date'] = year['Date'].dt.floor(freq='H')
-     
-     # Format date. 
-     year['Date'] = year['Date'].dt.strftime('%m-%d %H:%M')
+     # Convert ZIP codes to strings.
+     df['Service Zip'] = df['Service Zip'].astype(str).str.zfill(5).str.slice(0, 5)
 
-     # Drop unused columns.
-     year = year[['Date', 'Fuel Category', 'Gen Mw', 'Marginal Flag']]
+     # Convert tariff types to strings.
+     df['NEM Tariff'] = df['NEM Tariff'].astype(str)
 
-     # Drop NaNs.
-     year.dropna(inplace=True)
+     # Convert strings to uppercase for nonnumeric columns.
+     df = df.apply(lambda x: x.str.upper() if x.dtype == "object" else x)
 
-     # Aggregate by fuel type for each hour. 
-     # NOTE: this simply takes the average of generation by fuel type across reporting intervals.
-     # NOTE: this simply treats whichever resource was marginal first as that which was marginal throughout the hour.
-     year = year.groupby(['Date', 'Fuel Category'], as_index=False).agg({'Gen Mw': 'mean', 'Marginal Flag': 'first'})
+     # Make labels compatible across utilities.
+     df.loc[df['Technology Type'] == 'SOLAR', ['Technology Type']] = 'SOLAR PV'
+     df.loc[df['Technology Type'] == 'OTHER, SOLAR PV', ['Technology Type']] = 'SOLAR PV'
+     df.loc[df['Technology Type'] == 'SOLAR PV;STORAGE', ['Technology Type']] = 'SOLAR PV, STORAGE'
+     df.loc[df['Technology Type'] == 'OTHER, SOLAR PV, STORAGE', ['Technology Type']] = 'SOLAR PV, STORAGE'
+     df.loc[df['Mounting Method'] == 'MIXED', ['Mounting Method']] = 'MULTIPLE'
+     df.loc[df['Tracking'] == 'MIXED', ['Tracking']] = 'MULTIPLE'
+     df.loc[df['Tracking'] == 'TRACKING', ['Tracking']] = 'SINGLE-AXIS'
 
-     # Rename columns. 
-     year.rename({'Gen Mw': 'Generation (MWh)'}, axis='columns', inplace=True)
+     #--- ASSUMPTIONS ---#
+
+     # For sites with  multiple tilts or azimuths, assign most common value.
+     df.loc[df['Tilt'] == 'MULTIPLE', ['Tilt']] = df['Tilt'].value_counts().index[0] # 18.0
+     df.loc[df['Azimuth'] == 'MULTIPLE', ['Azimuth']] = df['Azimuth'].value_counts().index[0] # 180.0
+
+     # Convert tilt and azimuth to floats (and assign NaNs for tracking systems).
+     df['Tilt'] = pd.to_numeric(df['Tilt'], errors='coerce')
+     df['Azimuth'] = pd.to_numeric(df['Azimuth'], errors='coerce')
+
+     # If no mounting method or tracking style is specified, assign the most common value.
+     df['Mounting Method'].fillna(value=df['Mounting Method'].value_counts().index[0], inplace=True)
+     df['Tracking'].fillna(value=df['Tracking'].value_counts().index[0], inplace=True)
+
+     # Replace instances of zero cost with NaNs.
+     df.loc[df['Total System Cost'] == 0.0, ['Total System Cost']] = float('NaN')
+     df.loc[df['Itc Cost Basis'] == 0.0, ['Itc Cost Basis']] = float('NaN')
+
+     # Correct what are presumably erroneous negative system and inverter sizes.
+     df['System Size DC'] = df['System Size DC'].abs()
+     df['System Size AC'] = df['System Size AC'].abs()
+     df['Inverter Size (kW AC)'] = df['Inverter Size (kW AC)'].abs()
+
+     #--- EXPORT ---#
 
      # Write dataframe to CSV.
-     year.to_csv(iso_gen_file, index=False)
+     df.to_csv(site_file, index=False)
 
-     return year
+     return df
 
 def lmps():
      '''Get real-time locational marginal prices for CAISO in 2022.'''
 
-     # Directory path. 
-     dir = 'data/lmps_2021'
-
-     # Year of data. 
-     year = pd.DataFrame()
-
-     # Combine locational marginal price data.
-     for file in os.listdir(dir):
-
-          # Update path.
-          path = os.path.join(dir, file)
-
-          # Read day into dataframe. 
-          day = pd.read_csv(path, skiprows=[0,1,2,3,5], index_col=False)
-
-          # Strip extraneous information.
-          day.drop(columns=['H'], inplace=True)
-
-          # Select subset of LMPs for one location. 
-          day = day.loc[day['Location ID'] == location_id]
-
-          # Convert hours to numeric type. 
-          day['Hour Ending'] = pd.to_numeric(day['Hour Ending'])
-
-          # Append day to year. 
-          year = pd.concat([year, day], ignore_index=True)
-
-     # Combine to datetime. 
-     year['Date'] = pd.to_datetime(year['Date']) + pd.to_timedelta(year['Hour Ending'] - 1, unit='h')
-
-     # Format date. 
-     year['Date'] = year['Date'].dt.strftime('%m-%d %H:%M')
-
-     # Sort by date.
-     year.sort_values(by=['Date'], inplace=True, ignore_index=True)
-          
-     # Drop unused columns.
-     year = year[['Date', 'Location ID', 'Location Name', 'Locational Marginal Price']]
-
-     # Drop NaNs.
-     year.dropna(inplace=True)
-
-     # Write dataframe to CSV.
-     year.to_csv(lmp_file, index=False)
-
-     return year
+     return
 
 if __name__ == '__main__':
+    
+     #--- Distributed Generation Interconnections ---#
 
-    # TBD
+     sites = None
+
+     # Load distributed generation interconnction data.
+     if os.path.exists(site_file):
+          sites = pd.read_csv(site_file)
+     else: 
+          sites = intercon()
+
+     print(sites)
