@@ -153,6 +153,10 @@ def intercon():
 
      #--- ASSUMPTIONS ---#
 
+     # If no tilt or azimuth is specified, assign the most common value.
+     df['Tilt'].fillna(value=df['Tilt'].value_counts().index[0], inplace=True) # 18.0
+     df['Azimuth'].fillna(value=df['Azimuth'].value_counts().index[0], inplace=True) # 180.0
+
      # For sites with  multiple tilts or azimuths, assign most common value.
      df.loc[df['Tilt'] == 'MULTIPLE', ['Tilt']] = df['Tilt'].value_counts().index[0] # 18.0
      df.loc[df['Azimuth'] == 'MULTIPLE', ['Azimuth']] = df['Azimuth'].value_counts().index[0] # 180.0
