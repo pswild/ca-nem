@@ -12,7 +12,6 @@ Created on Tue Apr 25 2022
 import os
 import time
 import glob
-import requests
 import pandas as pd
 import zipfile as zp
 from functools import reduce
@@ -45,7 +44,12 @@ rev_lmp_file = os.path.join(here, 'output/rev_lmp.csv')
 
 #--- TARIFFS ---#
 
-# Data structures for each utility's version of NEM 1.0 and 2.0.
+# TODO: Data structures for each utility's version of NEM 1.0 and 2.0.
+nems = {
+     'PGE': {},
+     'SCE': {},
+     'SDGE': {}
+}
 
 #--- FUNCTIONS ---#
 
