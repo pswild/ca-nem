@@ -10,10 +10,15 @@ Created on Tue Apr 25 2022
 """
 
 import os
+import time
+import glob
+import requests
 import pandas as pd
+import zipfile as zp
+from functools import reduce
+from selenium import webdriver
 
 # API keys. 
-CAISO_API_KEY = 'AUTHENTICATE MY DAMN REQUEST PLEASE'
 NREL_API_KEY = 'yqjUGnkgdH4m8XrGh6OXi8rK7JMLJh6q3PafSMls'
 EIA_API_KEY = 'GbKYer2Pz9JS0UttTjwxahbfN5ZzDKE0ZuyjsJQY'
 
@@ -25,13 +30,10 @@ here = os.path.dirname(os.path.realpath(__file__))
 #--- DATA ---#
 
 # Site file.
-site_file = os.path.join(here, 'data/CAISO_Interconnected_Project_Sites_2023-03-31.csv')
+site_file = os.path.join(here, 'data/Interconnected_Project_Sites_2023-03-31/CAISO_Interconnected_Project_Sites_2023-03-31.csv')
 
 # CAISO locational marginal price data.
-lmp_file = os.path.join(here, 'data/lmps.csv')
-
-# SAM representative generation profile(s). 
-sam_gen_file = os.path.join(here, 'data/pv_gen_profile.csv')
+lmp_file = os.path.join(here, 'data/CAISO_LMPs/2022/DLAP_PGAE-APND, DLAP_SCE-APND, DLAP_SDGE-APND/Aggregated_LMPs.csv')
 
 #--- OUTPUT ---# 
 
@@ -47,8 +49,8 @@ rev_lmp_file = os.path.join(here, 'output/rev_lmp.csv')
 
 #--- FUNCTIONS ---#
 
-def intercon():
-     '''Load distributed generation interconnection program data from CAISO.'''
+def get_sites():
+     '''Get distributed generation interconnection program (i.e., Rule 21) data from CAISO.'''
 
      # Columns to keep.
      usecols = [
@@ -97,7 +99,7 @@ def intercon():
 
      #--- LOAD ---#
 
-     # Directory.
+     # Distributed generation site data.
      dir = 'data/Interconnected_Project_Sites_2023-03-31/'
 
      # Dataframe for sites. 
@@ -106,13 +108,8 @@ def intercon():
      # Combine interconnection data from all utilities.
      for file in os.listdir(dir):
 
-          # Update path.
           path = os.path.join(dir, file)
-
-          # Read data from one utility into dataframe. 
           subset = pd.read_csv(path, usecols=usecols)
-
-          # Append. 
           df = pd.concat([df, subset])
 
      #--- FILTER ---#
@@ -157,7 +154,7 @@ def intercon():
      df['Tilt'].fillna(value=df['Tilt'].value_counts().index[0], inplace=True) # 18.0
      df['Azimuth'].fillna(value=df['Azimuth'].value_counts().index[0], inplace=True) # 180.0
 
-     # For sites with  multiple tilts or azimuths, assign most common value.
+     # For sites with multiple tilts or azimuths, assign most common value.
      df.loc[df['Tilt'] == 'MULTIPLE', ['Tilt']] = df['Tilt'].value_counts().index[0] # 18.0
      df.loc[df['Azimuth'] == 'MULTIPLE', ['Azimuth']] = df['Azimuth'].value_counts().index[0] # 180.0
 
@@ -185,21 +182,181 @@ def intercon():
 
      return df
 
-def lmps():
-     '''Get real-time locational marginal prices for CAISO in 2022.'''
+def get_gen():
+     '''Get normalized SAM generation profiles for each utility territory in CAISO.'''
 
-     return
+     # Normalized SAM generation profile(s). 
+     dir = 'data/SAM_Generation_Profiles/'
+
+     # Dictionary for profiles.
+     gens = {}
+
+     for file in os.listdir(dir):
+          
+          path = os.path.join(dir, file)
+          profile = pd.read_csv(path, encoding='latin-1')
+          gens[file] = profile
+
+     return gens
+
+def get_lmps(year, nodes):
+     '''Get hourly locational marginal prices corresponding to each utility territory from the 2022 Day Ahead Market (DAM).'''
+
+     # Columns to keep.
+     usecols = [
+          'INTERVALSTARTTIME_GMT',
+          'INTERVALENDTIME_GMT',
+          'OPR_DT',
+          'OPR_HR',
+          'NODE_ID',
+          'MARKET_RUN_ID',
+          'LMP_TYPE',
+          'XML_DATA_ITEM',
+          'MW'
+     ]
+
+     # Dates for formatting URLs.
+     month_dict = {
+          'Jan': ['0101', '0201'],
+          'Feb': ['0201', '0301'],
+          'Mar': ['0301', '0401'],
+          'Apr': ['0401', '0501'],
+          'May': ['0501', '0601'],
+          'Jun': ['0601', '0701'],
+          'Jul': ['0701', '0801'],
+          'Aug': ['0801', '0901'],
+          'Sep': ['0901', '1001'],
+          'Oct': ['1001', '1101'],
+          'Nov': ['1101', '1201'],
+          'Dec': ['1201', '0101']
+     }
+
+     # Default LAP (Load Aggregation Point) nodes corresponding to utility territories.
+     lap_node_list = [
+          'DLAP_PGAE-APND',
+          'DLAP_SCE-APND',
+          'DLAP_SDGE-APND',
+          'DLAP_VEA-APND'
+     ]
+
+     # Format API call.
+     node_entry = reduce(lambda x, y: x +','+ y, nodes)
+     name_entry = reduce(lambda x, y: x +', '+ y, nodes)
+
+     download_dir = f'/Users/parkerwild/GitHub/ca_nem/data/CAISO_LMPs/{str(year)}/{name_entry}'
+
+     chrome_options = webdriver.ChromeOptions()
+     prefs = {'download.default_directory' : download_dir}
+     chrome_options.add_experimental_option('prefs', prefs)
+
+     print('Accessing Chrome driver...')
+
+     driver = webdriver.Chrome(options=chrome_options, executable_path='/Users/parkerwild/GitHub/ca_nem/chromedriver_mac64/chromedriver.exe')
+
+     for month in month_dict.keys():
+
+          # Handle daylight savings time.
+          t = 'T08'
+
+          if month in ['May', 'Jul', 'Aug', 'Oct']:
+               t = 'T07'
+
+          # Handle last day of year.
+          start_year = year
+          end_year = year
+
+          if month == 'Dec':
+               start_year = year
+               end_year = year + 1
+
+          # URL.
+          api_call = "http://oasis.caiso.com/oasisapi/SingleZip?queryname=PRC_LMP&resultformat=6&" + \
+               "startdatetime=" + str(start_year) + month_dict[month][0] + t + ":00-0000&" + \
+               "enddatetime=" + str(end_year) + month_dict[month][1] + t + ":00-0000&" + \
+               "version=1&market_run_id=DAM&node=" + node_entry
+          
+          print(f'Downloading data for {month}...')
+
+          # Request.
+          driver.get(api_call)
+
+          time.sleep(15)
+
+     print('Closing Chrome driver...')
+     
+     driver.close()
+
+     print('Unzipping files...')
+     
+     zip_files = glob.glob(f'{download_dir}/*.zip')
+
+     for zip_filename in zip_files:
+
+          dir_name = os.path.splitext(zip_filename)[0]
+          
+          if not os.path.isdir(dir_name):
+               os.mkdir(dir_name)
+
+          zip_handler = zp.ZipFile(zip_filename, "r")
+          zip_handler.extractall(dir_name)
+
+     print('Concatenating CSVs...')
+
+     csv_files = glob.glob(f'{download_dir}/*/*.csv')
+
+     entries = []
+
+     for csv in csv_files:
+
+          df = pd.read_csv(csv)
+          entries.append(df)
+
+     lmps = pd.concat(entries)
+
+     print('Cleaning data...')
+
+     # Drop duplicates caused by Daylight Savings Time.
+     lmps.drop_duplicates(subset=['OPR_DT', 'OPR_HR', 'NODE', 'XML_DATA_ITEM'], inplace=True, ignore_index=True)
+
+     # Keep subset of columns.
+     lmps = lmps[usecols]
+
+     # Sort by interval start time.
+     lmps.sort_values(by=['INTERVALSTARTTIME_GMT', 'NODE_ID', 'LMP_TYPE'], inplace=True, ignore_index=True)
+
+     # Export to CSV.    
+     lmps.to_csv(f'{download_dir}/Aggregated_LMPs.csv', index=False)
+
+     print('Process complete!')
+
+     return lmps
 
 if __name__ == '__main__':
     
-     #--- Distributed Generation Interconnections ---#
+     #--- Solar PV Sites ---#
 
      sites = None
 
-     # Load distributed generation interconnction data.
      if os.path.exists(site_file):
           sites = pd.read_csv(site_file)
      else: 
-          sites = intercon()
+          sites = get_sites()
 
      print(sites)
+
+     #--- Generation Profiles ---#
+
+     gens = get_gen()
+
+     print(gens)
+
+     #--- Locational Marginal Prices ---#
+
+     lmps = None
+
+     if os.path.exists(lmp_file):
+          lmps = pd.read_csv(lmp_file)
+     else: 
+          lmps = get_lmps(2022, ['DLAP_PGAE-APND', 'DLAP_SCE-APND', 'DLAP_SDGE-APND'])
+
+     print(lmps)
