@@ -40,11 +40,11 @@ lmp_file = os.path.join(here, 'data/Aggregated_LMPs.csv')
 
 #--- OUTPUT ---# 
 
-# Normalized output for each unique profile. 
-output_file = os.path.join(here, 'output/Normalized_Outputs.csv')
+# Normalized value of solar by configuration. 
+norm_val_file = os.path.join(here, 'output/Norm_Val_by_Config.csv')
 
-# Value of each site. 
-valuation_file = os.path.join(here, 'output/Valuations.csv')
+# Annual value of each site. 
+site_val_file = os.path.join(here, 'output/Annual_Site_Vals.csv')
 
 #--- GENERATION PROFILES ---#
 
@@ -85,15 +85,15 @@ utility_to_node = {
 def valuation(sites, gens, tous, lmps):
      '''Calculate value of solar generation under flat rates, TOU rates, and LMPs.'''
 
-     output = gens.copy()
+     norm_vals = gens.copy()
 
-     # Scalar for calculating annual value of each site based on assigned generation profile and tariff structure.
-     scalars = pd.DataFrame(
+     # Normalized annual value of each configuration based on its tariff structure.
+     nav = pd.DataFrame(
           columns=[
                'Utility', 
-               'Normalized Value (Flat Rate)',
-               'Normalized Value (TOU Rate)',
-               'Normalized Value (LMP)'
+               'Normalized Value - Flat Rate',
+               'Normalized Value - TOU Rate',
+               'Normalized Value - LMP'
           ]
      )
 
@@ -104,20 +104,22 @@ def valuation(sites, gens, tous, lmps):
 
           # Column names. 
           gen_col = utility + ' Normalized Generation'
-          flat_rate_col = utility + ' Flat Rate ($/kW)'
-          tou_rate_col = utility + ' TOU Rate ($/kW)'
-          lmp_rate_col = utility + ' LMP ($/kW)'
-          flat_val_col = utility + ' Normalized Value (Flat Rate)'
-          tou_val_col = utility + ' Normalized Value (TOU Rate)'
-          lmp_val_col = utility + ' Normalized Value (LMP)'
+          flat_rate_col = utility + ' Flat Rate'
+          tou_rate_col = utility + ' TOU Rate'
+          lmp_rate_col = utility + ' LMP'
+          flat_val_col = utility + ' Normalized Value - Flat Rate'
+          tou_val_col = utility + ' Normalized Value - TOU Rate'
+          lmp_val_col = utility + ' Normalized Value - LMP'
+          flat_v_lmp_val_col = utility + ' Normalized Value of Flat Rate v. LMP (% Difference)'
+          tou_v_lmp_val_col = utility + ' Normalized Value of TOU Rate v. LMP (% Difference)'
 
           # Rename generation column.
-          output.rename(columns={gen_profile: gen_col}, inplace=True)          
+          norm_vals.rename(columns={gen_profile: gen_col}, inplace=True)          
 
           #--- Add Flat Rate ---#
 
           # Add column for flat rate. 
-          output[flat_rate_col] = flat_rates[utility]
+          norm_vals[flat_rate_col] = flat_rates[utility]
 
           #--- Add TOU Rate ---#
 
@@ -131,7 +133,7 @@ def valuation(sites, gens, tous, lmps):
           tou_slice.rename(columns={tou_rate_name: tou_rate_col}, inplace=True)
 
           # Add column for TOU rate.
-          output = output.merge(tou_slice, on='Timestamp')
+          norm_vals = norm_vals.merge(tou_slice, on='Timestamp')
 
           #--- Add LMPs ---#
 
@@ -148,61 +150,76 @@ def valuation(sites, gens, tous, lmps):
           lmp_slice = lmp_slice[['Timestamp', lmp_rate_col]]
 
           # Add column for LMPs. 
-          output = output.merge(lmp_slice, on='Timestamp')
+          norm_vals = norm_vals.merge(lmp_slice, on='Timestamp')
 
-          #--- Normalized Valuation ---#
+          #--- Normalized Hourly Valuation ($/kWcap/hour) ---#
 
-          # Compute normalized value of solar under flat rate.
-          output[flat_val_col] = output[gen_col] * output[flat_rate_col]
+          # NOTE: this is essentially the value created in a given hour by a 1 kW system 
+          # under each tariff structures, which can then be scaled by system capacity.
 
-          # Compute normalized value of solar under TOU rate.
-          output[tou_val_col] = output[gen_col] * output[tou_rate_col]
+          # Compute normalized value of solar for each configuration under flat rate.
+          norm_vals[flat_val_col] = norm_vals[gen_col] * norm_vals[flat_rate_col]
 
-          # Compute normalized value of solar under LMPs.
-          output[lmp_val_col] = output[gen_col] * output[lmp_rate_col]
+          # Compute normalized value of solar for each configuration under TOU rate.
+          norm_vals[tou_val_col] = norm_vals[gen_col] * norm_vals[tou_rate_col]
 
-          #--- Valuation Scalar ---#
+          # Compute normalized value of solar for each configuration under LMPs.
+          norm_vals[lmp_val_col] = norm_vals[gen_col] * norm_vals[lmp_rate_col]
 
-          # Compute valuation scalar for each unique profile. 
-          scalars = scalars.append({
+          # Compute percentage difference in normalized value of solar between NEM rates and LMPs.
+          # NOTE: LMP is the baseline.
+          norm_vals[flat_v_lmp_val_col] = (norm_vals[flat_val_col] - norm_vals[lmp_val_col])/norm_vals[lmp_val_col]
+          norm_vals[tou_v_lmp_val_col] = (norm_vals[tou_val_col] - norm_vals[lmp_val_col])/norm_vals[lmp_val_col]
+
+          #--- Normalized Annual Valuation ($/kWcap/year) ---#
+
+          # NOTE: this is just a sum of all hourly value created by a 1 kW system over
+          # the course of a year, which can then be scaled by system capacity. 
+
+          # Compute normalized annual value of solar for each configuration and tariff structure. 
+          nav = nav.append({
                'Utility': utility, 
-               'Normalized Annual Value (Flat Rate)': output[flat_val_col].sum(),
-               'Normalized Annual Value (TOU Rate)': output[tou_val_col].sum(),
-               'Normalized Annual Value (LMP)': output[lmp_val_col].sum()
+               'Normalized Annual Value - Flat Rate': norm_vals[flat_val_col].sum(),
+               'Normalized Annual Value - TOU Rate': norm_vals[tou_val_col].sum(),
+               'Normalized Annual Value - LMP': norm_vals[lmp_val_col].sum()
           }, ignore_index=True)
 
      # Write to CSV.
-     output.to_csv(output_file, index=False)
+     norm_vals.to_csv(norm_val_file, index=False)
 
-     # Merge scalars onto sites. 
-     sites = sites.merge(scalars, on='Utility')
+     # Merge normalized annual value data onto sites based on configuration (which is just utility in this case). 
+     sites = sites.merge(nav, on='Utility')
+
+     # Combine normalized annual value columns for NEM.
+     sites['Normalized Annual Value - NEM'] = None
+
+     sites.loc[sites['NEM Tariff'].astype(str) == '1.0', 'Normalized Annual Value - NEM'] = sites['Normalized Annual Value - Flat Rate']
+     sites.loc[sites['NEM Tariff'].astype(str) == '2.0', 'Normalized Annual Value - NEM'] = sites['Normalized Annual Value - TOU Rate']
 
      # Compute annual values.
-     sites['Annual Value (NEM)'] = None
-     sites['Annual Value (LMP)'] = None
+     sites['Annual Value - NEM'] = None
+     sites['Annual Value - LMP'] = None
 
-     sites.loc[sites['NEM Tariff'].astype(str) == '1.0', 'Annual Value (NEM)'] = sites['Normalized Annual Value (Flat Rate)'] * sites['System Size AC']
-     sites.loc[sites['NEM Tariff'].astype(str) == '2.0', 'Annual Value (NEM)'] = sites['Normalized Annual Value (TOU Rate)'] * sites['System Size AC']
-     sites['Annual Value (LMP)'] = sites['Normalized Annual Value (LMP)'] * sites['System Size AC']
+     sites.loc[sites['NEM Tariff'].astype(str) == '1.0', 'Annual Value - NEM'] = sites['Normalized Annual Value - Flat Rate'] * sites['System Size AC']
+     sites.loc[sites['NEM Tariff'].astype(str) == '2.0', 'Annual Value - NEM'] = sites['Normalized Annual Value - TOU Rate'] * sites['System Size AC']
+     sites['Annual Value - LMP'] = sites['Normalized Annual Value - LMP'] * sites['System Size AC']
 
      # Columns to keep.
      usecols = [
           'Utility',
-          'Service City',
           'NEM Tariff',
           'System Size AC',
-          'Normalized Annual Value (Flat Rate)',
-          'Normalized Annual Value (TOU Rate)', 
-          'Normalized Annual Value (LMP)',
-          'Annual Value (NEM)',
-          'Annual Value (LMP)'
+          'Normalized Annual Value - NEM',          
+          'Normalized Annual Value - LMP',
+          'Annual Value - NEM',
+          'Annual Value - LMP'
      ]
 
      # Drop unused columns. 
-     valuations = sites[usecols]
+     site_vals = sites[usecols]
 
      # Write dataframe to CSV.
-     valuations.to_csv(valuation_file, index=False)
+     site_vals.to_csv(site_val_file, index=False)
 
      return
 
