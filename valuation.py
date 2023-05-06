@@ -110,8 +110,8 @@ def valuation(sites, gens, tous, lmps):
           flat_val_col = utility + ' Normalized Value - Flat Rate'
           tou_val_col = utility + ' Normalized Value - TOU Rate'
           lmp_val_col = utility + ' Normalized Value - LMP'
-          flat_v_lmp_val_col = utility + ' Normalized Value of Flat Rate v. LMP (% Difference)'
-          tou_v_lmp_val_col = utility + ' Normalized Value of TOU Rate v. LMP (% Difference)'
+          flat_v_lmp_val_col = utility + ' Difference in Value of 1 kW Solar - Flat Rate v LMP'
+          tou_v_lmp_val_col = utility + ' Difference in Value of 1 kW Solar - TOU Rate v LMP'
 
           # Rename generation column.
           norm_vals.rename(columns={gen_profile: gen_col}, inplace=True)          
@@ -167,7 +167,6 @@ def valuation(sites, gens, tous, lmps):
           norm_vals[lmp_val_col] = norm_vals[gen_col] * norm_vals[lmp_rate_col]
 
           # Compute percentage difference in normalized value of solar between NEM rates and LMPs.
-          # NOTE: LMP is the baseline.
           norm_vals[flat_v_lmp_val_col] = (norm_vals[flat_val_col] - norm_vals[lmp_val_col])/norm_vals[lmp_val_col]
           norm_vals[tou_v_lmp_val_col] = (norm_vals[tou_val_col] - norm_vals[lmp_val_col])/norm_vals[lmp_val_col]
 
@@ -209,6 +208,8 @@ def valuation(sites, gens, tous, lmps):
           'Utility',
           'NEM Tariff',
           'System Size AC',
+          'Normalized Annual Value - Flat Rate',
+          'Normalized Annual Value - TOU Rate',
           'Normalized Annual Value - NEM',          
           'Normalized Annual Value - LMP',
           'Annual Value - NEM',
