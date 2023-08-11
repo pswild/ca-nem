@@ -1,5 +1,5 @@
 # Cloudy Incentives for Solar: How Distortions in Retail Electricity Pricing Affect the Value of Distributed Generation
-Exploring the distortionary impact of California's net energy metering (NEM) policies on distributed energy resource (DER) investment decisions for SPI 582B: The Economics of Climate Change Policy.
+A package for analyzing the distortionary impact of California's net energy metering (NEM) policies on distributed energy resource (DER) valuation.
 
 # TODO
 1. Use PySAM's PVWatts module to generate 8760s for each representative generation profile (by region, mounting and tracking method, azimuth and tilt).
